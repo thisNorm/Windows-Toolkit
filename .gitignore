@@ -1,0 +1,10 @@
+# Build outputs and local settings
+**/bin/
+**/obj/
+**/TestResults/
+*.user
+*.suo
+.vs/
+.idea/
+*.zip
+*.lnk
