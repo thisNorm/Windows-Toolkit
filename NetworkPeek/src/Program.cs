@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Net.NetworkInformation;
@@ -40,6 +41,9 @@ namespace NetworkPeek
         private readonly Preferences preferences = Preferences.Load();
         private readonly ToolStripMenuItem copyIp;
         private readonly ToolStripMenuItem copyGateway;
+        private readonly ThemeSettings themeSettings = ThemeSettings.Load();
+        private readonly ContextMenuStrip themePopup;
+        private readonly List<ToolStripMenuItem> themeChoices = new List<ToolStripMenuItem>();
         private NetworkSnapshot snapshot = new NetworkSnapshot();
         private int requested = 1;
         private int ticks;
@@ -73,10 +77,23 @@ namespace NetworkPeek
                 preferences.Save();
             };
             menu.Items.Add(visible);
-            var startup = new ToolStripMenuItem("Windows 시작 시 실행") { CheckOnClick = true, Checked = Startup.IsEnabled() };
-            startup.CheckedChanged += delegate
+            var themeMenu = new ToolStripMenuItem("테마");
+            themeMenu.DropDownItems.AddRange(CreateThemeItems());
+            menu.Items.Add(themeMenu);
+            themePopup = new ContextMenuStrip();
+            themePopup.Items.AddRange(CreateThemeItems());
+            details.MenuIsVisible = delegate { return menu.Visible || themePopup.Visible; };
+            menu.Closed += OnMenuClosed;
+            themePopup.Closed += OnMenuClosed;
+            details.ThemeRequested += delegate(Point point) { themePopup.Show(point); };
+            var startup = new ToolStripMenuItem("Windows 시작 시 실행");
+            menu.Opening += delegate {
+                try { startup.Checked = Startup.IsEnabled(); startup.Enabled = true; }
+                catch (Exception) { startup.Enabled = false; }
+            };
+            startup.Click += delegate
             {
-                try { Startup.SetEnabled(startup.Checked); }
+                try { Startup.SetEnabled(!Startup.IsEnabled()); startup.Checked = Startup.IsEnabled(); }
                 catch (Exception error) { MessageBox.Show(error.Message, "시작 프로그램 설정", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             };
             menu.Items.Add(startup);
@@ -91,6 +108,8 @@ namespace NetworkPeek
             NetworkChange.NetworkAddressChanged += OnNetworkChanged;
             NetworkChange.NetworkAvailabilityChanged += OnAvailabilityChanged;
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
+            SystemEvents.UserPreferenceChanged += OnSystemThemeChanged;
+            themeSettings.Changed += OnThemeChanged;
             timer = new System.Windows.Forms.Timer { Interval = 1000 };
             timer.Tick += delegate
             {
@@ -99,11 +118,47 @@ namespace NetworkPeek
                 if (Interlocked.Exchange(ref requested, 0) != 0) Refresh();
             };
             timer.Start();
+            ApplyTheme();
             if (preferences.BarVisible) bar.Show();
             Refresh();
         }
 
         private void OnNetworkChanged(object sender, EventArgs e) { Interlocked.Exchange(ref requested, 1); }
+        private ToolStripMenuItem[] CreateThemeItems()
+        {
+            var result = new List<ToolStripMenuItem>();
+            foreach (ThemeMode mode in new[] { ThemeMode.Light, ThemeMode.Dark, ThemeMode.System }) {
+                ThemeMode selected = mode;
+                var item = new ToolStripMenuItem(mode.ToString()) { Tag = mode };
+                item.Click += delegate {
+                    try { themeSettings.SetMode(selected); }
+                    catch (Exception error) { MessageBox.Show(error.Message, "테마 설정", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+                };
+                themeChoices.Add(item); result.Add(item);
+            }
+            return result.ToArray();
+        }
+        private void OnThemeChanged(object sender, EventArgs e) { ApplyTheme(); }
+        private void OnMenuClosed(object sender, ToolStripDropDownClosedEventArgs e)
+        {
+            if (exiting || details.IsDisposed || !details.Visible) return;
+            if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked) details.Activate();
+            else if (e.CloseReason == ToolStripDropDownCloseReason.AppClicked || e.CloseReason == ToolStripDropDownCloseReason.AppFocusChange) details.Hide();
+        }
+        private void OnSystemThemeChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            if (themeSettings.Mode != ThemeMode.System || exiting || bar.IsDisposed) return;
+            try { bar.BeginInvoke((Action)delegate { if (!exiting) ApplyTheme(); }); }
+            catch (InvalidOperationException) { }
+        }
+        private void ApplyTheme()
+        {
+            Theme.Current = themeSettings.IsDark ? ThemeColors.Dark : ThemeColors.Light;
+            bar.ApplyTheme(); details.ApplyTheme();
+            Theme.ApplyMenu(tray.ContextMenuStrip); Theme.ApplyMenu(themePopup);
+            details.SetThemeMode(themeSettings.Mode);
+            foreach (var item in themeChoices) item.Checked = (ThemeMode)item.Tag == themeSettings.Mode;
+        }
         private void OnAvailabilityChanged(object sender, NetworkAvailabilityEventArgs e) { Interlocked.Exchange(ref requested, 1); }
         private void OnDisplayChanged(object sender, EventArgs e)
         {
@@ -162,10 +217,13 @@ namespace NetworkPeek
             NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
             NetworkChange.NetworkAvailabilityChanged -= OnAvailabilityChanged;
             SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
+            SystemEvents.UserPreferenceChanged -= OnSystemThemeChanged;
+            themeSettings.Changed -= OnThemeChanged;
             tray.Visible = false;
             tray.Icon.Dispose();
             tray.ContextMenuStrip.Dispose();
             tray.Dispose();
+            themePopup.Dispose();
             details.Dispose();
             bar.Dispose();
             showSignal.Dispose();
