@@ -6,22 +6,49 @@ namespace NetworkPeek
 {
     internal static class Theme
     {
-        internal static readonly Color Background = Color.FromArgb(20, 26, 36);
-        internal static readonly Color Card = Color.FromArgb(30, 39, 54);
-        internal static readonly Color Border = Color.FromArgb(53, 67, 87);
-        internal static readonly Color Muted = Color.FromArgb(151, 168, 189);
-        internal static readonly Color Accent = Color.FromArgb(89, 213, 181);
+        internal static ThemeColors Current = ThemeColors.Light;
+        internal static Color Background { get { return Current.Background; } }
+        internal static Color Text { get { return Current.Text; } }
+        internal static Color Card { get { return Current.Card; } }
+        internal static Color Border { get { return Current.Card; } }
+        internal static Color Muted { get { return Current.Muted; } }
+        internal static Color Accent { get { return Current.Accent; } }
         internal static Label Label(string text, float size, Color color, int x, int y, int width, int height, bool bold)
         {
-            return new Label { Text = text, Font = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular), ForeColor = color, BackColor = Color.Transparent, Bounds = new Rectangle(x, y, width, height), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+            return new Label { Text = text, Font = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular), ForeColor = color, Tag = color == Muted ? "muted" : color == Accent ? "accent" : "text", BackColor = Color.Transparent, Bounds = new Rectangle(x, y, width, height), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
         }
         internal static Button Button(string text, int x, int y, int width, Action action)
         {
-            var button = new Button { Text = text, Bounds = new Rectangle(x, y, width, 34), BackColor = Card, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, TabStop = true };
-            button.FlatAppearance.BorderColor = Border;
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(43, 57, 75);
+            var button = new Button { Text = text, Bounds = new Rectangle(x, y, width, 34), BackColor = Background, ForeColor = Text, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand, TabStop = true };
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = Current.Hover;
             button.Click += delegate { action(); };
             return button;
+        }
+        internal static void Apply(Control control)
+        {
+            control.BackColor = control is Label ? Color.Transparent : Background;
+            control.ForeColor = Object.Equals(control.Tag, "muted") ? Muted : Object.Equals(control.Tag, "accent") ? Accent : Text;
+            var button = control as Button;
+            if (button != null) {
+                button.FlatAppearance.BorderSize = 0;
+                button.FlatAppearance.MouseOverBackColor = Current.Hover;
+                button.FlatAppearance.MouseDownBackColor = Card;
+            }
+            foreach (Control child in control.Controls) Apply(child);
+            control.Invalidate();
+        }
+        internal static void ApplyMenu(ToolStrip menu)
+        {
+            menu.BackColor = Background;
+            menu.ForeColor = Text;
+            menu.Renderer = new ThemeMenuRenderer(Current);
+            foreach (ToolStripItem item in menu.Items) {
+                item.BackColor = Background;
+                item.ForeColor = Text;
+                var dropdown = item as ToolStripDropDownItem;
+                if (dropdown != null && dropdown.HasDropDownItems) ApplyMenu(dropdown.DropDown);
+            }
         }
         internal static void FitText(Label label, float maximumSize)
         {
@@ -54,7 +81,7 @@ namespace NetworkPeek
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Segoe UI", 9);
             BackColor = Theme.Background;
-            ForeColor = Color.White;
+            ForeColor = Theme.Text;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -64,12 +91,12 @@ namespace NetworkPeek
         }
         protected override CreateParams CreateParams
         {
-            get { var value = base.CreateParams; value.ExStyle |= 0x80; return value; }
+            get { var value = base.CreateParams; value.ExStyle |= 0x80; value.ClassStyle |= 0x00020000; return value; }
         }
-        protected override void OnPaint(PaintEventArgs e)
+        internal virtual void ApplyTheme()
         {
-            base.OnPaint(e);
-            using (var pen = new Pen(Theme.Border)) e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+            Theme.Apply(this);
+            Invalidate(true);
         }
     }
 
@@ -94,11 +121,11 @@ namespace NetworkPeek
             Cursor = Cursors.Hand;
             AccessibleName = "NetworkPeek IP 표시줄";
             dot = Theme.Label("●", 8, Theme.Muted, 12, 0, 14, 42, false);
-            address = Theme.Label("확인 중…", 11, Color.White, 49, 0, 143, 42, true);
+            address = Theme.Label("확인 중…", 11, Theme.Text, 49, 0, 143, 42, true);
             gateway = Theme.Label("—", 10, Theme.Muted, 231, 0, 126, 42, false);
             ipCaption = Theme.Label("IP", 8, Theme.Muted, 28, 0, 22, 42, true);
             gatewayCaption = Theme.Label("GW", 8, Theme.Muted, 204, 0, 28, 42, true);
-            divider = Theme.Label("│", 12, Theme.Border, 190, 0, 14, 42, false);
+            divider = Theme.Label("", 12, Theme.Muted, 190, 0, 14, 42, false);
             ipCaption.AutoSize = gatewayCaption.AutoSize = true;
             Controls.Add(dot);
             Controls.Add(ipCaption);
@@ -154,6 +181,7 @@ namespace NetworkPeek
             address.Text = snapshot.Primary == null ? "연결 없음" : snapshot.Primary.IPv4;
             gateway.Text = snapshot.Primary == null ? "—" : snapshot.Primary.Gateway;
             dot.ForeColor = snapshot.Primary == null ? Theme.Muted : Theme.Accent;
+            dot.Tag = snapshot.Primary == null ? "muted" : "accent";
             AccessibleDescription = "IP " + address.Text + ", 게이트웨이 " + gateway.Text;
             FitAddresses();
         }
@@ -169,6 +197,7 @@ namespace NetworkPeek
             Theme.FitText(address, 11);
             Theme.FitText(gateway, 10);
         }
+        internal override void ApplyTheme() { base.ApplyTheme(); FitAddresses(); }
     }
 
     internal sealed class AddressRow : Button
@@ -206,7 +235,7 @@ namespace NetworkPeek
             var measured = TextRenderer.MeasureText(e.Graphics, Text, Font, new Size(Int32.MaxValue, Int32.MaxValue), flags);
             float fit = Math.Min(1f, Math.Min((valueBounds.Width - 2f) / Math.Max(1, measured.Width), (Height - 4f) / Math.Max(1, measured.Height)));
             using (var valueFont = new Font(Font.FontFamily, Math.Max(7, Font.Size * fit), Font.Style))
-                TextRenderer.DrawText(e.Graphics, Text, valueFont, valueBounds, Enabled ? Color.White : Theme.Muted, flags);
+                TextRenderer.DrawText(e.Graphics, Text, valueFont, valueBounds, Enabled ? Theme.Text : Theme.Muted, flags);
             if (Enabled)
             {
                 using (var pen = new Pen(highlighted ? Theme.Accent : Theme.Muted, scale))
@@ -232,23 +261,33 @@ namespace NetworkPeek
     internal sealed class DetailsWindow : PeekForm
     {
         internal event Action<string> CopyRequested;
+        internal event Action<Point> ThemeRequested;
+        internal Func<bool> MenuIsVisible;
         private readonly Label connection;
         private readonly Label feedback;
         private readonly AddressRow address;
         private readonly AddressRow gateway;
         private readonly Timer feedbackTimer;
+        private readonly Button themeButton;
         private NetworkSnapshot snapshot = new NetworkSnapshot();
 
         internal DetailsWindow()
         {
             ClientSize = new Size(320, 148);
             AccessibleName = "NetworkPeek IP와 게이트웨이";
-            connection = Theme.Label("확인 중", 9, Theme.Muted, 22, 10, 244, 24, false);
+            connection = Theme.Label("확인 중", 9, Theme.Muted, 22, 10, 150, 24, false);
             Controls.Add(connection);
+            themeButton = Theme.Button("System ▾", 176, 8, 100, delegate { if (ThemeRequested != null) ThemeRequested(PointToScreen(new Point(themeButton.Left, themeButton.Bottom))); });
+            themeButton.Height = 28;
+            themeButton.Font = new Font("Segoe UI", 8.5f);
+            themeButton.Tag = "muted";
+            themeButton.AccessibleName = "테마 선택";
+            Controls.Add(themeButton);
             var close = Theme.Button("×", 278, 8, 28, Hide);
             close.Height = 28;
             close.BackColor = Theme.Background;
             close.ForeColor = Theme.Muted;
+            close.Tag = "muted";
             close.FlatAppearance.BorderSize = 0;
             close.TabStop = false;
             close.AccessibleName = "닫기";
@@ -265,7 +304,7 @@ namespace NetworkPeek
             feedbackTimer = new Timer { Interval = 1600 };
             feedbackTimer.Tick += delegate { ResetFeedback(); };
             VisibleChanged += delegate { ResetFeedback(); };
-            Deactivate += delegate { Hide(); };
+            Deactivate += delegate { if (MenuIsVisible == null || !MenuIsVisible()) Hide(); };
             FormClosing += delegate(object sender, FormClosingEventArgs e)
             {
                 if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
@@ -286,17 +325,20 @@ namespace NetworkPeek
         }
 
         private void Copy(string value) { if (CopyRequested != null) CopyRequested(value); }
+        internal void SetThemeMode(ThemeMode mode) { themeButton.Text = mode + " ▾"; }
         private void ResetFeedback()
         {
             feedbackTimer.Stop();
             feedback.Text = "클릭해 복사";
             feedback.ForeColor = Theme.Muted;
+            feedback.Tag = "muted";
         }
         internal void ShowFeedback(string message)
         {
             feedbackTimer.Stop();
             feedback.Text = message;
             feedback.ForeColor = Theme.Accent;
+            feedback.Tag = "accent";
             feedbackTimer.Start();
         }
         internal void PlaceNear(CompactBar bar)

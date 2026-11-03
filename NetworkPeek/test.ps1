@@ -11,3 +11,14 @@ New-Item -ItemType Directory -Path $destination -Force | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 & (Join-Path $destination 'NetworkReaderTests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'NetworkPeek tests failed.' }
+& $compiler /nologo /codepage:65001 /target:exe "/out:$destination\ThemeSettingsTests.exe" /reference:System.dll /reference:System.Core.dll `
+    (Join-Path $PSScriptRoot 'src\ThemeSettings.cs') (Join-Path $PSScriptRoot 'tests\ThemeSettingsTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Theme setting test build failed.' }
+& (Join-Path $destination 'ThemeSettingsTests.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Theme setting tests failed.' }
+$sources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' | Select-Object -ExpandProperty FullName)
+& $compiler /nologo /codepage:65001 /target:exe /main:ThemeStyleTests "/out:$destination\ThemeStyleTests.exe" `
+    /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll @sources (Join-Path $PSScriptRoot 'tests\ThemeStyleTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Theme UI test build failed.' }
+& (Join-Path $destination 'ThemeStyleTests.exe')
+if ($LASTEXITCODE -ne 0) { throw 'Theme UI tests failed.' }
